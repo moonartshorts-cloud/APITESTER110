@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SAP OData Explorer | PMTS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .main-card { border-radius: 15px; border: none; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        .table-responsive { max-height: 500px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; }
+        th { position: sticky; top: 0; background-color: #004a99 !important; color: white; z-index: 10; white-space: nowrap; }
+        td { white-space: nowrap; max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+        .loading-spinner { display: none; }
+        .step-badge { background-color: #004a99; color: white; border-radius: 50%; width: 25px; height: 25px; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; font-size: 14px; }
+        .section-header { font-weight: 600; color: #495057; display: flex; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="card main-card p-4">
+            <h3 class="text-primary mb-4 border-bottom pb-3">SAP OData API Explorer</h3>
+            
+            <div class="mb-4">
+                <label class="section-header mb-2"><span class="step-badge">1</span> Load API Metadata</label>
+                <div class="input-group">
+                    <input type="text" id="metadataUrl" class="form-control" placeholder="Paste SAP Metadata URL here..." 
+                           value="https://dev.sap.powermech.net/sap/opu/odata/sap/API_BUSINESS_PARTNER/$metadata?sap-client=100">
+                    <button class="btn btn-secondary px-4" id="btnScan" onclick="scanEntities()">Scan Entities</button>
+                </div>
+                <small class="text-muted">Enter the $metadata URL to discover available tables.</small>
+            </div>
+
+            <div id="selectionArea" class="mb-4" style="display:none;">
+                <label class="section-header mb-2"><span class="step-badge">2</span> Select Entity & Fetch Data</label>
+                <div class="input-group">
+                    <select id="entityDropdown" class="form-select" aria-label="Select Entity">
+                        </select>
+                    <button class="btn btn-primary px-5" id="btnFetch" onclick="processData()">Fetch Top 100</button>
+                </div>
+            </div>
+
+            <div id="status" class="text-center my-4 loading-spinner">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 text-primary fw-bold" id="statusText">Communicating with SAP...</p>
+            </div>
+
+            <div id="resultsArea" style="display:none;">
+                <hr>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 id="entityTitle" class="mb-0 text-secondary"></h5>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-success btn-sm" onclick="downloadExcel()">Export CSV</button>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-hover table-sm" id="resultTable">
+                        <thead id="thead"></thead>
+                        <tbody id="tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = [];
+        let currentCols = [];
+
+        async function scanEntities() {
+            const url = document.getElementById('metadataUrl').value;
+            const btn = document.getElementById('btnScan');
+            const status = document.getElementById('status');
+            const selectionArea = document.getElementById('selectionArea');
+
+            if(!url) return alert("Please enter a Metadata URL");
+
+            btn.disabled = true;
+            status.style.display = 'block';
+            document.getElementById('statusText').innerText = "Scanning Metadata for Entities...";
+
+            try {
+                const response = await fetch('/get_entities', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ url: url })
+                });
+
+                const result = await response.json();
+                if(result.error) throw new Error(result.error);
+
+                const dropdown = document.getElementById('entityDropdown');
+                dropdown.innerHTML = result.entities.map(e => 
+                    `<option value="${e.name}">${e.name} (${e.type.split('.').pop()})</option>`
+                ).join('');
+
+                selectionArea.style.display = 'block';
+                status.style.display = 'none';
+            } catch (err) {
+                alert("Scan Error: " + err.message);
+                status.style.display = 'none';
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function processData() {
+            const url = document.getElementById('metadataUrl').value;
+            const entitySet = document.getElementById('entityDropdown').value;
+            const btn = document.getElementById('btnFetch');
+            const status = document.getElementById('status');
+            const resultsArea = document.getElementById('resultsArea');
+
+            btn.disabled = true;
+            status.style.display = 'block';
+            document.getElementById('statusText').innerText = `Fetching records from ${entitySet}...`;
+            resultsArea.style.display = 'none';
+
+            try {
+                const response = await fetch('/fetch_data', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ url: url, entity_set: entitySet })
+                });
+
+                const result = await response.json();
+                if(result.error) throw new Error(result.error);
+
+                currentData = result.data;
+                currentCols = result.columns;
+
+                document.getElementById('entityTitle').innerText = "Active Entity: " + result.entity;
+
+                let headHtml = '<tr>';
+                result.columns.forEach(col => headHtml += `<th>${col}</th>`);
+                headHtml += '</tr>';
+                document.getElementById('thead').innerHTML = headHtml;
+
+                let bodyHtml = '';
+                result.data.forEach(row => {
+                    bodyHtml += '<tr>';
+                    result.columns.forEach(col => {
+                        let val = row[col];
+                        if (typeof val === 'object' && val !== null) val = "[Object]";
+                        bodyHtml += `<td>${val || ''}</td>`;
+                    });
+                    bodyHtml += '</tr>';
+                });
+                document.getElementById('tbody').innerHTML = bodyHtml;
+
+                resultsArea.style.display = 'block';
+            } catch (err) {
+                alert("Data Error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                status.style.display = 'none';
+            }
+        }
+
+        function downloadExcel() {
+            if (currentData.length === 0) return;
+            let csvContent = "data:text/csv;charset=utf-8," 
+                + currentCols.join(",") + "\n"
+                + currentData.map(row => currentCols.map(col => {
+                    let cell = row[col] === null ? "" : row[col].toString();
+                    return `"${cell.replace(/"/g, '""')}"`;
+                }).join(",")).join("\n");
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `SAP_${document.getElementById('entityDropdown').value}_Export.csv`);
+            document.body.appendChild(link);
+            link.click();
+        }
+    </script>
+</body>
+</html>
