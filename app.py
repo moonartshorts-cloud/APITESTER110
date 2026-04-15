@@ -9,7 +9,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 app = Flask(__name__)
 
 # Fixed credentials for PMTS SAP System
-AUTH = ("SAP_API", "Refresh@1122334455")
+AUTH = ("SAP_API", "Refresh@111222333")
 
 def fix_sap_url(url):
     """Ensures the URL uses HTTPS and includes the mandatory SAP port 44300."""
