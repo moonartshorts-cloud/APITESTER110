@@ -79,7 +79,7 @@ def fetch_data():
         # 2. Construct Data URL and Fetch
         base_path = metadata_url.split('$metadata')[0].rstrip('/')
         data_url = f"{base_path}/{selected_entity}"
-        params = {"$top": 100, "$format": "json", "sap-client": "100"}
+        params = {"$top": 100, "$format": "json", "sap-client": "110"}
         
         data_resp = requests.get(data_url, params=params, auth=AUTH, verify=False, timeout=20)
         json_res = data_resp.json()
